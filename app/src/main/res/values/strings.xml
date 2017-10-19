@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">JPMCCodingChallenge</string>
+    <string name="degree">°</string>
+    <string name="Today">Today</string>
+    <string name="Tomorrow">Tomorrow</string>
+    <string name="zip">Zip</string>
+    <string name="units">Units</string>
+    <string name="fahrenheit">Fahrenheit</string>
+    <string name="celsius">Celsius</string>
+    <string name="settings">settings</string>
+</resources>

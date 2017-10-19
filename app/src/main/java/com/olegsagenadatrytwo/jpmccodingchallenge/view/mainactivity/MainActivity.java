@@ -1,0 +1,300 @@
+package com.olegsagenadatrytwo.jpmccodingchallenge.view.mainactivity;
+
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Build;
+import android.os.Bundle;
+import android.support.v4.content.ContextCompat;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.DefaultItemAnimator;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.Toolbar;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import com.olegsagenadatrytwo.jpmccodingchallenge.R;
+import com.olegsagenadatrytwo.jpmccodingchallenge.entitities.custom.DayData;
+import com.olegsagenadatrytwo.jpmccodingchallenge.entitities.weatherInfo.WeatherInfo;
+import com.olegsagenadatrytwo.jpmccodingchallenge.entitities.weatherInfoHourly.HourlyForecast;
+import com.olegsagenadatrytwo.jpmccodingchallenge.entitities.weatherInfoHourly.HourlyWeatherInfo;
+import com.olegsagenadatrytwo.jpmccodingchallenge.injection.mainactivity.DaggerMainActivityComponent;
+import com.olegsagenadatrytwo.jpmccodingchallenge.view.mainactivity.adapters.DaysAdapter;
+import com.olegsagenadatrytwo.jpmccodingchallenge.view.settingsactivity.SettingsActivity;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.inject.Inject;
+
+public class MainActivity extends AppCompatActivity implements MainActivityContract.View {
+
+    //constants
+    private static final String SETTINGS_PREF_FILE = "settings";
+    private static final String CURRENT_SETTING = "F/C";
+    private static final String ZIP_CODE = "zip_code";
+    private static final int SETTINGS_REQUEST = 1;
+
+    //presenter
+    @Inject
+    MainActivityPresenter presenter;
+
+    //views for toolbar
+    private TextView tvTemperature;
+    private TextView tvCondition;
+    private Toolbar myToolbar;
+    private LinearLayout toolBarHeaderViewLinearLayout;
+
+    //recycler view
+    private RecyclerView rvDays;
+    private DaysAdapter adapter;
+
+    //global weather data variables to avoid API calls
+    private WeatherInfo weatherInfo;
+    private HourlyWeatherInfo hourlyWeatherInfo;
+    private String globalZipCode = "";
+    private String globalFOrC = "";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        DaggerMainActivityComponent.create().inject(this);
+        actionBarSetUp();
+        recyclerViewSetUp();
+        initSharedPreferenceSettings();
+        presenterSetUp();
+    }
+
+    /**
+     * action bar set up
+     */
+    private void actionBarSetUp() {
+        LinearLayout includeView = (LinearLayout) findViewById(R.id.toolbar_header_view);
+        tvTemperature = (TextView) includeView.findViewById(R.id.tvTemperatureTop);
+        tvCondition = (TextView) includeView.findViewById(R.id.tvConditionTop);
+        toolBarHeaderViewLinearLayout = (LinearLayout) includeView.findViewById(R.id.toolbar_header_view);
+        myToolbar = (Toolbar) findViewById(R.id.my_toolbar);
+        myToolbar.setTitleTextColor(ContextCompat.getColor(getApplicationContext(), R.color.colorWhite));
+        setSupportActionBar(myToolbar);
+    }
+
+    /**
+     * create options menu
+     */
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.action_bar, menu);
+        return true;
+    }
+
+    /**
+     * options for action bar
+     */
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            //case for zip code change
+            case R.id.action_settings:
+                Intent settings = new Intent(this, SettingsActivity.class);
+                startActivityForResult(settings, SETTINGS_REQUEST);
+                break;
+        }
+        return true;
+    }
+
+    /**
+     * on activity result
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == SETTINGS_REQUEST) {
+            SharedPreferences sharedPreferences = getSharedPreferences(SETTINGS_PREF_FILE, Context.MODE_PRIVATE);
+            String zipCode = sharedPreferences.getString(ZIP_CODE, "default");
+            String fOrC = sharedPreferences.getString(CURRENT_SETTING, "default");
+
+            //if zip code was changed make a API call
+            if (!globalZipCode.equals(zipCode)) {
+                presenter.downloadWeatherDataHourly(zipCode);
+                presenter.downloadWeatherData(zipCode);
+                globalFOrC = fOrC;
+
+            } else { // if zip code was not changed check if the unit was changed
+
+                if (!globalFOrC.equals(fOrC)) {
+                    weatherDownloadedUpdateUI(weatherInfo);
+                    hourlyWeatherDownloadedUpdateUI(hourlyWeatherInfo);
+                    globalFOrC = fOrC;
+                }
+                globalFOrC = fOrC;
+            }
+
+        }
+    }
+
+    /**
+     * recycler view set up
+     */
+    private void recyclerViewSetUp() {
+        rvDays = (RecyclerView) findViewById(R.id.rvDays);
+        RecyclerView.LayoutManager layoutManager = new LinearLayoutManager(this);
+        RecyclerView.ItemAnimator itemAnimator = new DefaultItemAnimator();
+        rvDays.setLayoutManager(layoutManager);
+        rvDays.setItemAnimator(itemAnimator);
+    }
+
+    /**
+     * configure the initial settings sharedPreference
+     */
+    private void initSharedPreferenceSettings() {
+        SharedPreferences sharedPreferences = getSharedPreferences(SETTINGS_PREF_FILE, Context.MODE_PRIVATE);
+        String fahrenheitOrCelsius = sharedPreferences.getString(CURRENT_SETTING, "default");
+
+        //if there was no current settings for temperature make fahrenheit the default
+        if (fahrenheitOrCelsius.equals("default")) {
+            SharedPreferences.Editor editor = sharedPreferences.edit();
+            editor.putString(CURRENT_SETTING, getString(R.string.fahrenheit));
+            editor.apply();
+            globalFOrC = getString(R.string.fahrenheit);
+        } else {
+            globalFOrC = fahrenheitOrCelsius;
+        }
+
+        String zipCode = sharedPreferences.getString(ZIP_CODE, "default");
+
+        //if there was no current zip code make georgia marietta zip code to be default
+        if (zipCode.equals("default")) {
+            SharedPreferences.Editor editor = sharedPreferences.edit();
+            editor.putString(ZIP_CODE, "30008");
+            editor.apply();
+        }
+
+    }
+
+    /**
+     * presenter set up
+     */
+    private void presenterSetUp() {
+        presenter.attachView(this);
+        presenter.attachRemote();
+
+        SharedPreferences sharedPreferences = getSharedPreferences(SETTINGS_PREF_FILE, Context.MODE_PRIVATE);
+        String zipCode = sharedPreferences.getString(ZIP_CODE, "default");
+        if (zipCode.equals("default")) {
+            Intent settings = new Intent(this, SettingsActivity.class);
+            startActivityForResult(settings, SETTINGS_REQUEST);
+        } else {
+            presenter.downloadWeatherData(zipCode);
+            presenter.downloadWeatherDataHourly(zipCode);
+        }
+
+    }
+
+
+    /**
+     * This method will update the toolbar with current weather info
+     */
+    @Override
+    public void weatherDownloadedUpdateUI(final WeatherInfo weatherInfo) {
+
+        this.weatherInfo = weatherInfo;
+
+        //if weatherInfo is null this means that invalid zip code was entered, so re ask the user
+        if (weatherInfo.getCurrentObservation() == null) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+
+                    //take the user to settings to update zip code
+                    Intent settings = new Intent(getApplicationContext(), SettingsActivity.class);
+                    settings.putExtra("error", "invalid zip code");
+                    startActivityForResult(settings, SETTINGS_REQUEST);
+                }
+            });
+        } else {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+
+                    SharedPreferences sharedPreferences = getSharedPreferences(SETTINGS_PREF_FILE, Context.MODE_PRIVATE);
+                    String fahrenheitOrCelsius = sharedPreferences.getString(CURRENT_SETTING, "default");
+                    String zipCode = sharedPreferences.getString(ZIP_CODE, "default");
+                    globalZipCode = zipCode;
+
+                    //update the toolbar with current hour weather info
+                    if (fahrenheitOrCelsius.equals(getString(R.string.fahrenheit))) {
+                        String temperature = String.valueOf(weatherInfo.getCurrentObservation().getTempF());
+                        String temperatureWithDegreeSign = temperature + getString(R.string.degree);
+                        tvTemperature.setText(temperatureWithDegreeSign);
+                    } else {
+                        String temperature = String.valueOf(weatherInfo.getCurrentObservation().getTempC());
+                        String temperatureWithDegreeSign = temperature + getString(R.string.degree);
+                        tvTemperature.setText(temperatureWithDegreeSign);
+                    }
+                    tvCondition.setText(weatherInfo.getCurrentObservation().getWeather());
+                    myToolbar.setTitle(weatherInfo.getCurrentObservation().getDisplayLocation().getFull());
+
+                    //change the color of toolbar based on current temperature
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        if (weatherInfo.getCurrentObservation().getTempF() > 60) {
+                            toolBarHeaderViewLinearLayout.setBackgroundColor(ContextCompat.getColor(getApplicationContext(), R.color.colorAccent));
+                            myToolbar.setBackgroundColor(ContextCompat.getColor(getApplicationContext(), R.color.colorAccent));
+                        } else {
+                            toolBarHeaderViewLinearLayout.setBackgroundColor(ContextCompat.getColor(getApplicationContext(), R.color.colorPrimary));
+                            myToolbar.setBackgroundColor(ContextCompat.getColor(getApplicationContext(), R.color.colorPrimary));
+                        }
+                    }
+                }
+            });
+        }
+
+    }
+
+    /**
+     * This method will update the hourly forecast for each day
+     */
+    @Override
+    public void hourlyWeatherDownloadedUpdateUI(final HourlyWeatherInfo hourlyWeatherInfo) {
+
+        if (hourlyWeatherInfo != null && hourlyWeatherInfo.getHourlyForecast() != null) {
+            this.hourlyWeatherInfo = hourlyWeatherInfo;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    List<HourlyForecast> individualDay = new ArrayList<>();
+                    List<DayData> listOfDays = new ArrayList<>();
+                    DayData dayData;
+
+                    for (int i = 0; i < hourlyWeatherInfo.getHourlyForecast().size(); i++) {
+                        if (Integer.parseInt(hourlyWeatherInfo.getHourlyForecast().get(i).getFCTTIME().getHour()) < 24 &&
+                                Integer.parseInt(hourlyWeatherInfo.getHourlyForecast().get(i).getFCTTIME().getHour()) != 0) {
+
+                            individualDay.add(hourlyWeatherInfo.getHourlyForecast().get(i));
+
+                        } else if (Integer.parseInt(hourlyWeatherInfo.getHourlyForecast().get(i).getFCTTIME().getHour()) == 0) {
+
+                            dayData = new DayData(individualDay);
+                            listOfDays.add(dayData);
+                            individualDay = new ArrayList<>();
+                            individualDay.add(hourlyWeatherInfo.getHourlyForecast().get(i));
+
+                        }
+                    }
+
+                    SharedPreferences sharedPreferences = getSharedPreferences(SETTINGS_PREF_FILE, Context.MODE_PRIVATE);
+                    String fahrenheitOrCelsius = sharedPreferences.getString(CURRENT_SETTING, "default");
+                    adapter = new DaysAdapter(listOfDays, getApplicationContext(), fahrenheitOrCelsius);
+                    rvDays.setAdapter(adapter);
+                    adapter.notifyDataSetChanged();
+                }
+            });
+        }
+    }
+}
+
